@@ -1,63 +1,68 @@
 import os
 import asyncio
-import requests
+import yfinance as yf
 import google.generativeai as genai
 from telegram import Bot
 
-# Налаштування з Railway
+# Налаштування
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-TD_KEY = os.getenv("TWELVE_DATA_KEY")
 
-# Налаштування Gemini 3 Flash
 genai.configure(api_key=GEMINI_KEY)
-# Ставимо найновішу модель, яку ти бачиш у студії
-model = genai.GenerativeModel('gemini-3-flash')
 
-# Тикери для ринку
-SYMBOLS = "GOLD,GBP/USD,EUR/USD,AUD/USD,USD/JPY"
+# Спроба підключити Gemini 3, якщо ні — ставимо 1.5
+try:
+    model = genai.GenerativeModel('gemini-3-flash')
+except:
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
-def get_twelve_data():
+# Список активів (Золото та основні пари)
+SYMBOLS = {
+    "GC=F": "Gold (Золото)",
+    "GBPUSD=X": "GBP/USD",
+    "EURUSD=X": "EUR/USD",
+    "AUDUSD=X": "AUD/USD",
+    "JPY=X": "USD/JPY"
+}
+
+def get_market_data():
     try:
-        url = f"https://api.twelvedata.com/quote?symbol={SYMBOLS}&apikey={TD_KEY}"
-        response = requests.get(url).json()
-        summary = "📊 Поточні котирування:\n"
-        if isinstance(response, dict):
-            for symbol, data in response.items():
-                price = data.get('close', 'Н/Д')
-                summary += f"• {symbol}: {price}\n"
+        summary = "📊 Дані з Yahoo Finance:\n"
+        for ticker, name in SYMBOLS.items():
+            data = yf.Ticker(ticker)
+            price = data.fast_info['last_price']
+            summary += f"• {name}: {price:.4f}\n"
         return summary
     except Exception as e:
-        return f"Помилка даних: {e}"
+        return f"Помилка Yahoo: {e}"
 
 async def get_ai_analysis(market_info):
     prompt = (
-        f"Ти — топовий трейдер Smart Money. Ось дані: {market_info}. "
-        "Зроби розривний аналіз для Telegram. Акцент на пастках для ритейл-трейдерів. "
-        "Пиши жорстко, по суті, українською, з вогняними емодзі. "
-        "В кінці дай коротку пораду на наступну годину."
+        f"Ти профі Smart Money трейдер. Ось дані: {market_info}. "
+        "Зроби жорсткий та короткий аналіз українською. "
+        "Де ліквідність? Де пастка? Дай прогноз на найближчу годину з емодзі."
     )
+    # Бот спробує видати аналіз
     response = model.generate_content(prompt)
     return response.text
 
 async def main():
     bot = Bot(token=BOT_TOKEN)
-    print("🚀 'Паравоз' на Gemini 3 Flash погнав!")
+    print(f"🚀 'Паравоз' на yfinance та Gemini запущений!")
     
     while True:
         try:
-            market_data = get_twelve_data()
+            market_data = get_market_data()
             analysis = await get_ai_analysis(market_data)
             
             await bot.send_message(chat_id=CHANNEL_ID, text=analysis)
-            print("✅ Аналіз відправлено!")
+            print("✅ Пост відправлено. Спимо годину.")
             
-            # Пауза 1 година, щоб не палити ліміти Twelve Data дарма
+            # Пауза 1 година (можна спати спокійно)
             await asyncio.sleep(3600)
         except Exception as e:
-            print(f"⚠️ Тимчасовий збій: {e}")
-            # Чекаємо 10 хв і пробуємо знову, якщо була помилка
+            print(f"⚠️ Збій: {e}. Перезапуск через 10 хв.")
             await asyncio.sleep(600)
 
 if __name__ == "__main__":
