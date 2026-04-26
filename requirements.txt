@@ -1,4 +1,4 @@
-python-telegram-bot
-google-generativeai
 yfinance
+google-generativeai
+python-telegram-bot
 requests
