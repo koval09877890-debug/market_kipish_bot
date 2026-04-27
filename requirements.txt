@@ -1,4 +1,5 @@
+pyTelegramBotAPI
+
 yfinance
+
 google-generativeai
-python-telegram-bot
-requests
