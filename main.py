@@ -4,67 +4,53 @@ import google.generativeai as genai
 import yfinance as yf
 import time
 
-# 🔑 Дані з Railway Secrets
+# 🔑 Беремо дані з Railway
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
-CHANNEL_ID = os.environ.get('CHANNEL_ID') # Твій канал -100...
+# Отримуємо ID каналу
+CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
-# 🤖 Налаштування Gemini (як у футбольному)
+# Перевірка в логах (ти побачиш це в Railway)
+print(f"DEBUG: Мій токен: {BOT_TOKEN[:5] if BOT_TOKEN else 'НЕМАЄ'}...")
+print(f"DEBUG: ID каналу: {CHANNEL_ID}")
+
 genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Список активів для Yahoo Finance
-SYMBOLS = {
-    "GC=F": "Золото (GOLD)",
-    "GBPUSD=X": "GBP/USD",
-    "EURUSD=X": "EUR/USD",
-    "AUDUSD=X": "AUD/USD",
-    "JPY=X": "USD/JPY"
-}
+SYMBOLS = {"GC=F": "Gold", "GBPUSD=X": "GBP/USD", "AUDUSD=X": "AUD/USD"}
 
 def get_market_info():
-    try:
-        summary = "📊 СТАН РИНКУ НА ЗАРАЗ:\n\n"
-        for ticker, name in SYMBOLS.items():
+    summary = "📊 РИНОК:\n"
+    for ticker, name in SYMBOLS.items():
+        try:
             t = yf.Ticker(ticker)
-            # Беремо останню ціну
             price = t.fast_info['last_price']
             summary += f"🔹 {name}: {price:.4f}\n"
-        return summary
-    except Exception as e:
-        return f"❌ Помилка Yahoo: {str(e)[:50]}"
-
-def ask_gemini_market(data):
-    prompt = (
-        f"Ти — професійний трейдер Smart Money. Проаналізуй ці дані: {data}. "
-        "Напиши короткий кіпіш-аналіз для Telegram каналу. "
-        "Де пастки маркетмейкерів? Де ліквідність? Дай прогноз на годину. "
-        "Пиши УКРАЇНСЬКОЮ мовою, жорстко, по суті, з вогняними емодзі."
-    )
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"❌ Помилка AI: {str(e)[:50]}"
+        except:
+            continue
+    return summary
 
 def run_kipish():
-    print("🚀 'Паравоз' виїхав на колію!")
+    print("🚀 Паравоз виїхав!")
     while True:
         try:
-            # 1. Отримуємо цифри
+            if not CHANNEL_ID:
+                print("❌ ПОМИЛКА: CHANNEL_ID не знайдено в Variables!")
+                time.sleep(60)
+                continue
+                
             market_data = get_market_info()
-            # 2. Питаємо у Gemini
-            analysis = ask_gemini_market(market_data)
-            # 3. Відправляємо в канал
-            bot.send_message(CHANNEL_ID, analysis)
-            print("✅ Сигнал відправлено в канал!")
-            # 4. Спимо 1 годину (3600 секунд)
+            response = model.generate_content(f"Ти Smart Money трейдер. Дані: {market_data}. Напиши аналіз укр мовою з емодзі.")
+            
+            # ВІДПРАВКА
+            bot.send_message(CHANNEL_ID, response.text)
+            print("✅ СИГНАЛ В КАНАЛІ!")
             time.sleep(3600)
         except Exception as e:
-            print(f"❌ Помилка в циклі: {e}")
-            time.sleep(300) # Якщо помилка — чекаємо 5 хв і пробуємо знову
+            print(f"❌ Помилка: {e}")
+            time.sleep(300)
 
 if __name__ == "__main__":
     run_kipish()
