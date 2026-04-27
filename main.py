@@ -1,69 +1,70 @@
+import telebot
 import os
-import asyncio
-import yfinance as yf
 import google.generativeai as genai
-from telegram import Bot
+import yfinance as yf
+import time
 
-# Налаштування
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_KEY = os.getenv("GEMINI_KEY")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
+# 🔑 Дані з Railway Secrets
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+GEMINI_KEY = os.environ.get('GEMINI_KEY')
+CHANNEL_ID = os.environ.get('CHANNEL_ID') # Твій канал -100...
 
+# 🤖 Налаштування Gemini (як у футбольному)
 genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-3-flash-preview')
 
-# Спроба підключити Gemini 3, якщо ні — ставимо 1.5
-try:
-    model = genai.GenerativeModel('gemini-3-flash')
-except:
-    model = genai.GenerativeModel('gemini-1.5-flash')
+bot = telebot.TeleBot(BOT_TOKEN)
 
-# Список активів (Золото та основні пари)
+# Список активів для Yahoo Finance
 SYMBOLS = {
-    "GC=F": "Gold (Золото)",
+    "GC=F": "Золото (GOLD)",
     "GBPUSD=X": "GBP/USD",
     "EURUSD=X": "EUR/USD",
     "AUDUSD=X": "AUD/USD",
     "JPY=X": "USD/JPY"
 }
 
-def get_market_data():
+def get_market_info():
     try:
-        summary = "📊 Дані з Yahoo Finance:\n"
+        summary = "📊 СТАН РИНКУ НА ЗАРАЗ:\n\n"
         for ticker, name in SYMBOLS.items():
-            data = yf.Ticker(ticker)
-            price = data.fast_info['last_price']
-            summary += f"• {name}: {price:.4f}\n"
+            t = yf.Ticker(ticker)
+            # Беремо останню ціну
+            price = t.fast_info['last_price']
+            summary += f"🔹 {name}: {price:.4f}\n"
         return summary
     except Exception as e:
-        return f"Помилка Yahoo: {e}"
+        return f"❌ Помилка Yahoo: {str(e)[:50]}"
 
-async def get_ai_analysis(market_info):
+def ask_gemini_market(data):
     prompt = (
-        f"Ти профі Smart Money трейдер. Ось дані: {market_info}. "
-        "Зроби жорсткий та короткий аналіз українською. "
-        "Де ліквідність? Де пастка? Дай прогноз на найближчу годину з емодзі."
+        f"Ти — професійний трейдер Smart Money. Проаналізуй ці дані: {data}. "
+        "Напиши короткий кіпіш-аналіз для Telegram каналу. "
+        "Де пастки маркетмейкерів? Де ліквідність? Дай прогноз на годину. "
+        "Пиши УКРАЇНСЬКОЮ мовою, жорстко, по суті, з вогняними емодзі."
     )
-    # Бот спробує видати аналіз
-    response = model.generate_content(prompt)
-    return response.text
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"❌ Помилка AI: {str(e)[:50]}"
 
-async def main():
-    bot = Bot(token=BOT_TOKEN)
-    print(f"🚀 'Паравоз' на yfinance та Gemini запущений!")
-    
+def run_kipish():
+    print("🚀 'Паравоз' виїхав на колію!")
     while True:
         try:
-            market_data = get_market_data()
-            analysis = await get_ai_analysis(market_data)
-            
-            await bot.send_message(chat_id=CHANNEL_ID, text=analysis)
-            print("✅ Пост відправлено. Спимо годину.")
-            
-            # Пауза 1 година (можна спати спокійно)
-            await asyncio.sleep(3600)
+            # 1. Отримуємо цифри
+            market_data = get_market_info()
+            # 2. Питаємо у Gemini
+            analysis = ask_gemini_market(market_data)
+            # 3. Відправляємо в канал
+            bot.send_message(CHANNEL_ID, analysis)
+            print("✅ Сигнал відправлено в канал!")
+            # 4. Спимо 1 годину (3600 секунд)
+            time.sleep(3600)
         except Exception as e:
-            print(f"⚠️ Збій: {e}. Перезапуск через 10 хв.")
-            await asyncio.sleep(600)
+            print(f"❌ Помилка в циклі: {e}")
+            time.sleep(300) # Якщо помилка — чекаємо 5 хв і пробуємо знову
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_kipish()
