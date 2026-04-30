@@ -2,24 +2,34 @@ import telebot
 import os
 import google.generativeai as genai
 import yfinance as yf
-import pandas as pd
+import time
 from datetime import datetime, timedelta
-from telebot import types
+from flask import Flask
+from threading import Thread
 
-# 🔑 Конфігурація
+# 🔑 Налаштування
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
+CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
 genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Налаштування пар
+# Flask потрібен, щоб Railway не "вбивав" процес
+app = Flask('')
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
 SYMBOLS = {
-    "GBP/USD": "GBPUSD=X",
-    "GOLD (XAU)": "GC=F",
-    "EUR/USD": "EURUSD=X",
-    "AUD/USD": "AUDUSD=X"
+    "фунт": "GBPUSD=X",
+    "золото": "GC=F",
+    "євро": "EURUSD=X",
+    "австралієць": "AUDUSD=X"
 }
 
 def calculate_rsi(ticker_symbol):
@@ -34,56 +44,53 @@ def calculate_rsi(ticker_symbol):
         return f"{rsi.iloc[-1]:.2f}"
     except: return "N/A"
 
-def get_dxy_status():
-    try:
-        t = yf.Ticker("DX-Y.NYB")
-        price = t.fast_info['last_price']
-        return f"DXY: {price:.2f}"
-    except: return "DXY: дані недоступні"
-
 @bot.message_handler(commands=['start'])
 def start(message):
-    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    buttons = [types.KeyboardButton(s) for s in SYMBOLS.keys()]
-    markup.add(*buttons)
-    bot.send_message(message.chat.id, "Привіт, Апурва! Обери пару для миттєвого аналізу 📊", reply_markup=markup)
+    bot.reply_to(message, "Привіт! Напиши назву пари (наприклад: фунт, золото, євро), і я зроблю повний аналіз у канал.")
 
-@bot.message_handler(func=lambda message: message.text in SYMBOLS.keys())
-def handle_analysis(message):
-    pair_name = message.text
-    ticker = SYMBOLS[pair_name]
-    
-    bot.send_message(message.chat.id, f"🔍 Аналізую {pair_name}... Зачекай секунду.")
-    
-    # Збір даних
-    price = yf.Ticker(ticker).fast_info['last_price']
-    rsi_val = calculate_rsi(ticker)
-    dxy = get_dxy_status()
-    kyiv_time = (datetime.utcnow() + timedelta(hours=3)).strftime('%H:%M')
-    
-    prompt = f"""
-    Інструмент: {pair_name}
-    Ціна зараз: {price}
-    RSI: {rsi_val}
-    {dxy}
-    Час: {kyiv_time}
-    
-    Ти — Smart Money Expert. Зроби повний розбір:
-    1. Макро та Polymarket: що зараз впливає на актив?
-    2. Stop Hunt: Де зони BSL/SSL, де ми заберемо ліквідність натовпу?
-    3. Лімітка: Конкретний Buy/Sell Limit, Stop Loss та Take Profit.
-    4. RSI порада: Чи не запізно входити?
-    
-    Пиши українською, чітко, для про-трейдера.
-    """
-    
-    try:
+@bot.message_handler(func=lambda m: True)
+def handle_text(message):
+    text = message.text.lower()
+    found_ticker = None
+    pair_name = ""
+
+    for key, ticker in SYMBOLS.items():
+        if key in text:
+            found_ticker = ticker
+            pair_name = key.upper()
+            break
+
+    if found_ticker:
+        bot.reply_to(message, f"🚀 Готую аналіз для {pair_name}...")
+        
+        # Збір даних
+        price = yf.Ticker(found_ticker).fast_info['last_price']
+        rsi_val = calculate_rsi(found_ticker)
+        dxy = yf.Ticker("DX-Y.NYB").fast_info['last_price']
+        kyiv_time = (datetime.utcnow() + timedelta(hours=3)).strftime('%H:%M')
+
+        prompt = f"""
+        Ти — Smart Money Expert. Аналізуй {pair_name}.
+        Ціна: {price}, RSI: {rsi_val}, DXY: {dxy:.2f}.
+        Час: {kyiv_time}.
+        
+        Зроби прогноз: Полімаркет (ставки/макро), Stop Hunt (де знімемо ліквідність), конкретна лімітка Entry/SL/TP.
+        Пиши українською з емодзі.
+        """
+        
         response = model.generate_content(prompt)
-        full_msg = f"💎 **{pair_name}** | {kyiv_time}\n\n{response.text}"
-        bot.send_message(message.chat.id, full_msg, parse_mode="Markdown")
-    except Exception as e:
-        bot.send_message(message.chat.id, "⚠️ Сталася помилка при генерації аналізу.")
+        full_msg = f"💎 **{pair_name} АНАЛІЗ** | {kyiv_time}\n\n{response.text}"
+        
+        # Відправка в канал
+        bot.send_message(CHANNEL_ID, full_msg, parse_mode="Markdown")
+        bot.send_message(message.chat.id, "✅ Готово! Перевір канал.")
+    else:
+        bot.reply_to(message, "Не впізнав пару. Спробуй: фунт, золото або євро.")
 
 if __name__ == "__main__":
-    print("🤖 Бот чекає на твої команди...")
+    # Запуск веб-сервера у фоні
+    t = Thread(target=run_web)
+    t.start()
+    
+    print("🤖 Бот запущений!")
     bot.infinity_polling()
