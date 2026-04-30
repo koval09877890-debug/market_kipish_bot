@@ -2,26 +2,24 @@ import telebot
 import os
 import google.generativeai as genai
 import yfinance as yf
-import time
 import pandas as pd
 from datetime import datetime, timedelta
+from telebot import types
 
 # 🔑 Конфігурація
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
-CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
 genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Твої робочі інструменти
+# Налаштування пар
 SYMBOLS = {
-    "GBPUSD=X": "GBP/USD", 
-    "GC=F": "GOLD (XAU/USD)", 
-    "EURUSD=X": "EUR/USD",
-    "AUDUSD=X": "AUD/USD",
-    "DX-Y.NYB": "DXY (Dollar Index)"
+    "GBP/USD": "GBPUSD=X",
+    "GOLD (XAU)": "GC=F",
+    "EUR/USD": "EURUSD=X",
+    "AUD/USD": "AUDUSD=X"
 }
 
 def calculate_rsi(ticker_symbol):
@@ -36,50 +34,56 @@ def calculate_rsi(ticker_symbol):
         return f"{rsi.iloc[-1]:.2f}"
     except: return "N/A"
 
-def run_kipish():
-    print("🚀 Запускаємо поштучний аналіз пар...")
-    while True:
-        try:
-            kyiv_time = (datetime.utcnow() + timedelta(hours=3)).strftime('%H:%M')
-            
-            for ticker, name in SYMBOLS.items():
-                price = yf.Ticker(ticker).fast_info['last_price']
-                rsi_val = calculate_rsi(ticker)
-                fmt = ".4f" if "USD" in name else ".2f"
-                
-                # Короткий, але потужний промпт для кожної пари
-                prompt = f"""
-                Пара: {name}
-                Ціна зараз: {price:{fmt}}
-                RSI (15m): {rsi_val}
-                Час: {kyiv_time}
-                
-                Ти професійний трейдер Smart Money. Дай короткий аналіз (до 500 символів):
-                1. Полімаркет/Макро: як новини впливають на {name}?
-                2. Stop Hunt: Де стоять стопи натовпу (BSL/SSL)?
-                3. Лімітка: Точна точка входу, SL та TP.
-                4. Висновок: Купуємо винос чи чекаємо ретест?
-                
-                Пиши українською, лаконічно, з емодзі.
-                """
-                
-                response = model.generate_content(prompt)
-                
-                msg = f"💎 **{name}** | {kyiv_time}\n\n{response.text}"
-                
-                try:
-                    bot.send_message(CHANNEL_ID, msg, parse_mode="Markdown")
-                except:
-                    bot.send_message(CHANNEL_ID, msg)
-                
-                time.sleep(5) # Пауза між повідомленнями, щоб Telegram не забанив
-            
-            print(f"✅ Всі пари оновлено о {kyiv_time}. Чекаємо годину.")
-            time.sleep(3600)
-            
-        except Exception as e:
-            print(f"❌ Помилка: {e}")
-            time.sleep(300)
+def get_dxy_status():
+    try:
+        t = yf.Ticker("DX-Y.NYB")
+        price = t.fast_info['last_price']
+        return f"DXY: {price:.2f}"
+    except: return "DXY: дані недоступні"
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    buttons = [types.KeyboardButton(s) for s in SYMBOLS.keys()]
+    markup.add(*buttons)
+    bot.send_message(message.chat.id, "Привіт, Апурва! Обери пару для миттєвого аналізу 📊", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text in SYMBOLS.keys())
+def handle_analysis(message):
+    pair_name = message.text
+    ticker = SYMBOLS[pair_name]
+    
+    bot.send_message(message.chat.id, f"🔍 Аналізую {pair_name}... Зачекай секунду.")
+    
+    # Збір даних
+    price = yf.Ticker(ticker).fast_info['last_price']
+    rsi_val = calculate_rsi(ticker)
+    dxy = get_dxy_status()
+    kyiv_time = (datetime.utcnow() + timedelta(hours=3)).strftime('%H:%M')
+    
+    prompt = f"""
+    Інструмент: {pair_name}
+    Ціна зараз: {price}
+    RSI: {rsi_val}
+    {dxy}
+    Час: {kyiv_time}
+    
+    Ти — Smart Money Expert. Зроби повний розбір:
+    1. Макро та Polymarket: що зараз впливає на актив?
+    2. Stop Hunt: Де зони BSL/SSL, де ми заберемо ліквідність натовпу?
+    3. Лімітка: Конкретний Buy/Sell Limit, Stop Loss та Take Profit.
+    4. RSI порада: Чи не запізно входити?
+    
+    Пиши українською, чітко, для про-трейдера.
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        full_msg = f"💎 **{pair_name}** | {kyiv_time}\n\n{response.text}"
+        bot.send_message(message.chat.id, full_msg, parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(message.chat.id, "⚠️ Сталася помилка при генерації аналізу.")
 
 if __name__ == "__main__":
-    run_kipish()
+    print("🤖 Бот чекає на твої команди...")
+    bot.infinity_polling()
