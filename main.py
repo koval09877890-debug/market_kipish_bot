@@ -3,8 +3,7 @@ import os
 import google.generativeai as genai
 import yfinance as yf
 import time
-import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 🔑 Дані з Railway
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
@@ -16,6 +15,7 @@ model = genai.GenerativeModel('gemini-3-flash-preview')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# Список символів (Додав коректні тікери для фунта та євро)
 SYMBOLS = {
     "DX-Y.NYB": "US Dollar Index", 
     "GC=F": "Gold", 
@@ -25,7 +25,9 @@ SYMBOLS = {
 }
 
 def get_market_info():
-    summary = f"⏰ ЧАС (Київ): {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    # Фікс часу: додаємо 3 години до UTC для Києва
+    kyiv_time = datetime.utcnow() + timedelta(hours=3)
+    summary = f"⏰ ЧАС (Київ): {kyiv_time.strftime('%Y-%m-%d %H:%M')}\n"
     summary += "📊 РИНКОВІ ДАНІ:\n"
     for ticker, name in SYMBOLS.items():
         try:
@@ -38,43 +40,46 @@ def get_market_info():
     return summary
 
 def run_kipish():
-    print("🚀 Паравоз виїхав! Помилки з Markdown виправлено.")
+    print("🚀 Паравоз виїхав! Час та точність ліміток налаштовано.")
     while True:
         try:
             if not CHANNEL_ID:
+                print("❌ CHANNEL_ID не знайдено!")
                 time.sleep(60)
                 continue
                 
             market_data = get_market_info()
             
+            # Оновлений промпт для точних точок входу (ICT/Smart Money)
             prompt = f"""
-            Ти професійний Smart Money трейдер. 
-            Дані ринку: {market_data}
+            Ти професійний ICT трейдер. Твій стиль — робота в зонах OTE (0.62-0.79) та ретест FVG.
+            
+            Дані ринку: 
+            {market_data}
             
             Твоє завдання:
-            1. Проаналізуй структуру MS та силу DXY.
-            2. Знайди найближчий FVG або локальний Order Block.
-            3. ВАЖЛИВО: Став лімітки близько до поточної ціни (зона OTE 0.62-0.79).
-            
-            Формат відповіді (УКРАЇНСЬКОЮ):
-            📊 КОНТЕКСТ РИНКУ
-            🎯 АКТУАЛЬНІ ЛІМІТКИ (Entry, SL, TP)
-            🚀 ЛОГІКА ВХОДУ (коротко)
+            1. Проаналізуй DXY. Якщо він падає — шукай лонги по FX/Gold.
+            2. Для кожного активу визнач POI (зону інтересу).
+            3. ВАЖЛИВО: Не став лімітки занадто далеко. Шукай вхід на найближчому FVG або рівні 0.5 (Equilibrium) поточного ранкового імпульсу.
+            4. Видай конкретну лімітку (Entry, SL, TP).
 
-            УВАГА: Не використовуй складне форматування Markdown, тільки жирний шрифт для заголовків.
+            Пиши українською з емодзі. Формат:
+            📊 КОНТЕКСТ РИНКУ
+            🎯 АКТУАЛЬНІ ЛІМІТКИ (максимально точні точки входу)
+            🚀 ЛОГІКА (чому саме ця зона OTE або FVG)
             """
             
             response = model.generate_content(prompt)
-            final_text = response.text
-
+            
+            # Додаємо перевірку на Markdown, щоб не було помилок як у логах
             try:
-                # Намагаємося відправити з Markdown
-                bot.send_message(CHANNEL_ID, final_text, parse_mode="Markdown")
+                bot.send_message(CHANNEL_ID, response.text, parse_mode="Markdown")
             except:
-                # Якщо Telegram "матюкається" на розмітку — відправляємо чистий текст
-                bot.send_message(CHANNEL_ID, final_text)
+                bot.send_message(CHANNEL_ID, response.text)
                 
-            print(f"✅ СИГНАЛ ВІДПРАВЛЕНО: {datetime.now().strftime('%H:%M')}")
+            kyiv_now = datetime.utcnow() + timedelta(hours=3)
+            print(f"✅ СИГНАЛ ВІДПРАВЛЕНО: {kyiv_now.strftime('%H:%M')}")
+            
             time.sleep(3600)
             
         except Exception as e:
