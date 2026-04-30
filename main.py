@@ -3,6 +3,7 @@ import os
 import google.generativeai as genai
 import yfinance as yf
 import time
+import pandas as pd
 from datetime import datetime, timedelta
 
 # 🔑 Дані з Railway
@@ -15,7 +16,6 @@ model = genai.GenerativeModel('gemini-3-flash-preview')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Список символів
 SYMBOLS = {
     "DX-Y.NYB": "US Dollar Index", 
     "GC=F": "Gold", 
@@ -24,64 +24,74 @@ SYMBOLS = {
     "EURUSD=X": "EUR/USD"
 }
 
+def calculate_rsi(ticker_symbol, periods=14):
+    try:
+        data = yf.download(ticker_symbol, period="1d", interval="15m", progress=False)
+        if data.empty: return "N/A"
+        delta = data['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (100 + rs))
+        return f"{rsi.iloc[-1]:.2f}"
+    except:
+        return "N/A"
+
 def get_market_info():
-    # Фікс часу: додаємо 3 години до UTC для Києва
-    kyiv_time = datetime.utcnow() + timedelta(hours=3)
-    summary = f"⏰ ЧАС (Київ): {kyiv_time.strftime('%Y-%m-%d %H:%M')}\n"
-    summary += "📊 РИНКОВІ ДАНІ:\n"
+    kyiv_now = datetime.utcnow() + timedelta(hours=3)
+    summary = f"⏰ ЧАС (Київ): {kyiv_now.strftime('%Y-%m-%d %H:%M')}\n"
+    summary += "📊 ТЕХНІЧНІ ДАНІ (RSI + Price):\n"
     for ticker, name in SYMBOLS.items():
         try:
             t = yf.Ticker(ticker)
             price = t.fast_info['last_price']
-            fmt = ".2f" if "Index" in name else ".4f"
-            summary += f"🔹 {name}: {price:{fmt}}\n"
+            rsi_val = calculate_rsi(ticker)
+            fmt = ".2f" if "Index" in name or "Gold" in name else ".4f"
+            summary += f"🔹 {name}: {price:{fmt}} (RSI: {rsi_val})\n"
         except:
             continue
     return summary
 
 def run_kipish():
-    print("🚀 Паравоз виїхав! Режим: Розумні входи та виправлений час.")
+    print("🚀 Пошук грааля активовано! Полюємо на ліквідність.")
     while True:
         try:
             if not CHANNEL_ID:
-                print("❌ CHANNEL_ID не знайдено!")
                 time.sleep(60)
                 continue
                 
             market_data = get_market_info()
             
-            # Оновлений промпт: жорстке порівняння цін
             prompt = f"""
-            Ти професійний ICT трейдер. Твій стиль — робота в зонах OTE (0.62-0.79) та ретест FVG.
+            Ти — професійний Smart Money та Institutional трейдер. Твоя спеціалізація: Stop Loss Hunting та Liquidity Sweeps.
             
-            Ось реальні ціни зараз: 
+            ДАНІ:
             {market_data}
             
-            Твоє завдання:
-            1. Проаналізуй структуру ринку.
-            2. Порівняй ціну лімітки з актуальними даними з ринку вище. 
-            3. ВАЖЛИВО: Якщо ти хочеш дати Buy Limit — ціна Entry МАЄ бути НИЖЧОЮ за поточну. 
-            4. Якщо ціна вже стоїть на твоєму рівні або дуже близько — не пиши "Limit", пиши "ВХІД ПО РИНКУ (MARKET)".
-            5. Не давай застарілих рівнів, які ціна вже пролетіла.
-
-            Пиши українською з емодзі. Формат:
-            📊 **КОНТЕКСТ РИНКУ**
-            🎯 **АКТУАЛЬНІ ВХОДИ** (Market або Limit з чіткими цифрами)
-            🚀 **ЛОГІКА** (чому саме ця зона)
+            ЗАВДАННЯ:
+            1. Проаналізуй макроекономічний фон та настрої на Polymarket (ставки FED, вибори, інфляція).
+            2. Визнач зони BSL (Buy Side Liquidity) та SSL (Sell Side Liquidity), де натовп ставить стопи.
+            3. Встанови лімітки (Buy/Sell Limit) саме за цими рівнями — там, де ринок забере ліквідність перед розворотом.
+            4. Врахуй RSI: якщо RSI > 70 — шукай точку входу в шорт від OB, якщо < 30 — лонг від FVG.
+            5. Поточна ціна має бути поруч! Не давай рівні, до яких ціна не дійде сьогодні.
+            
+            Структура (УКРАЇНСЬКОЮ):
+            📊 КОНТЕКСТ ТА ЕКОНОМІКА
+            🎯 ПОЛЮВАННЯ НА СТОПИ (Твої лімітки на зняття ліквідності)
+            🛡 УПРАВЛІННЯ РИЗИКОМ (SL та TP)
+            📈 RSI АНАЛІЗ (Чи перегрітий ринок?)
             """
             
             response = model.generate_content(prompt)
             
-            # Відправка з обробкою помилок розмітки
             try:
                 bot.send_message(CHANNEL_ID, response.text, parse_mode="Markdown")
             except:
                 bot.send_message(CHANNEL_ID, response.text)
                 
-            kyiv_now = datetime.utcnow() + timedelta(hours=3)
-            print(f"✅ СИГНАЛ ВІДПРАВЛЕНО: {kyiv_now.strftime('%H:%M')}")
+            kyiv_log = datetime.utcnow() + timedelta(hours=3)
+            print(f"✅ АНАЛІЗ ВІДПРАВЛЕНО: {kyiv_log.strftime('%H:%M')}")
             
-            # Чекаємо 1 годину (3600 сек)
             time.sleep(3600)
             
         except Exception as e:
