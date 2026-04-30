@@ -5,7 +5,7 @@ import yfinance as yf
 import time
 from datetime import datetime
 
-# 🔑 Дані з Railway (залишаємо як було)
+# 🔑 Дані з Railway
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 CHANNEL_ID = os.environ.get('CHANNEL_ID')
@@ -15,7 +15,7 @@ model = genai.GenerativeModel('gemini-3-flash-preview')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Розширений список символів (DXY обов'язково!)
+# Розширений список символів
 SYMBOLS = {
     "DX-Y.NYB": "US Dollar Index", 
     "GC=F": "Gold", 
@@ -38,7 +38,7 @@ def get_market_info():
     return summary
 
 def run_kipish():
-    print("🚀 Паравоз виїхав з лімітками!")
+    print("🚀 Паравоз виїхав з новими агресивними лімітками!")
     while True:
         try:
             if not CHANNEL_ID:
@@ -48,28 +48,29 @@ def run_kipish():
                 
             market_data = get_market_info()
             
-            # ОНОВЛЕНИЙ ПРОМПТ З ЛІМІТКАМИ
+            # ОНОВЛЕНИЙ ПРОМПТ ДЛЯ ТОЧНІШИХ ВХОДІВ (ICT Style)
             prompt = f"""
-            Ти професійний Smart Money трейдер. Твій стиль — пошук ліквідності (BSL/SSL) та робота від OB (Order Block).
+            Ти професійний Smart Money трейдер (стиль ICT). 
+            Твій пріоритет — висока точність та входи, які не треба чекати вічність.
             
-            Дані: 
+            Дані ринку: 
             {market_data}
             
             Твоє завдання:
-            1. Проаналізуй DXY (силу долара).
-            2. Для золота та валютних пар визнач ймовірні Зони інтересу (POI).
-            3. Напиши конкретні рівні для лімітних ордерів (Buy Limit / Sell Limit) та цілі (TP).
+            1. Проаналізуй структуру MS (Market Structure) та силу DXY.
+            2. Знайди найближчий FVG (Fair Value Gap) або локальний Order Block.
+            3. ВАЖЛИВО: Не став лімітки занадто далеко від ціни. Якщо тренд сильний, використовуй рівень 0.5 (Equilibrium) або зону OTE (0.62-0.79) поточного імпульсу.
             4. Врахуй макроекономіку та Polymarket (ставки, інфляція).
             
-            Напиши аналіз українською мовою з емодзі. Структура:
-            📊 Контекст ринку
-            🎯 Лімітки (точки входу)
-            🚀 Цілі (ліквідність)
+            Формат відповіді (УКРАЇНСЬКОЮ):
+            📊 **КОНТЕКСТ РИНКУ** (Коротко: DXY та загальний настрій)
+            🎯 **АКТУАЛЬНІ ЛІМІТКИ** (Buy/Sell Limit, Entry, SL, TP — максимально наближені до поточних значень)
+            🚀 **ЛОГІКА ВХОДУ** (Поясни: ретест FVG, зняття ліквідності чи OTE)
             """
             
             response = model.generate_content(prompt)
             
-            bot.send_message(CHANNEL_ID, response.text)
+            bot.send_message(CHANNEL_ID, response.text, parse_mode="Markdown")
             print(f"✅ СИГНАЛ ВІДПРАВЛЕНО: {datetime.now().strftime('%H:%M')}")
             
             # Чекаємо 1 годину (3600 сек)
