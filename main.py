@@ -6,92 +6,75 @@ import time
 import pandas as pd
 from datetime import datetime, timedelta
 
-# 🔑 Дані з Railway
+# 🔑 Конфігурація
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
 genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
-
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# Твої робочі інструменти
 SYMBOLS = {
-    "DX-Y.NYB": "US Dollar Index", 
-    "GC=F": "Gold", 
     "GBPUSD=X": "GBP/USD", 
+    "GC=F": "GOLD (XAU/USD)", 
+    "EURUSD=X": "EUR/USD",
     "AUDUSD=X": "AUD/USD",
-    "EURUSD=X": "EUR/USD"
+    "DX-Y.NYB": "DXY (Dollar Index)"
 }
 
-def calculate_rsi(ticker_symbol, periods=14):
+def calculate_rsi(ticker_symbol):
     try:
         data = yf.download(ticker_symbol, period="1d", interval="15m", progress=False)
         if data.empty: return "N/A"
         delta = data['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
         rsi = 100 - (100 / (100 + rs))
         return f"{rsi.iloc[-1]:.2f}"
-    except:
-        return "N/A"
-
-def get_market_info():
-    kyiv_now = datetime.utcnow() + timedelta(hours=3)
-    summary = f"⏰ ЧАС (Київ): {kyiv_now.strftime('%Y-%m-%d %H:%M')}\n"
-    summary += "📊 ТЕХНІЧНІ ДАНІ (RSI + Price):\n"
-    for ticker, name in SYMBOLS.items():
-        try:
-            t = yf.Ticker(ticker)
-            price = t.fast_info['last_price']
-            rsi_val = calculate_rsi(ticker)
-            fmt = ".2f" if "Index" in name or "Gold" in name else ".4f"
-            summary += f"🔹 {name}: {price:{fmt}} (RSI: {rsi_val})\n"
-        except:
-            continue
-    return summary
+    except: return "N/A"
 
 def run_kipish():
-    print("🚀 Пошук грааля активовано! Полюємо на ліквідність.")
+    print("🚀 Запускаємо поштучний аналіз пар...")
     while True:
         try:
-            if not CHANNEL_ID:
-                time.sleep(60)
-                continue
+            kyiv_time = (datetime.utcnow() + timedelta(hours=3)).strftime('%H:%M')
+            
+            for ticker, name in SYMBOLS.items():
+                price = yf.Ticker(ticker).fast_info['last_price']
+                rsi_val = calculate_rsi(ticker)
+                fmt = ".4f" if "USD" in name else ".2f"
                 
-            market_data = get_market_info()
-            
-            prompt = f"""
-            Ти — професійний Smart Money та Institutional трейдер. Твоя спеціалізація: Stop Loss Hunting та Liquidity Sweeps.
-            
-            ДАНІ:
-            {market_data}
-            
-            ЗАВДАННЯ:
-            1. Проаналізуй макроекономічний фон та настрої на Polymarket (ставки FED, вибори, інфляція).
-            2. Визнач зони BSL (Buy Side Liquidity) та SSL (Sell Side Liquidity), де натовп ставить стопи.
-            3. Встанови лімітки (Buy/Sell Limit) саме за цими рівнями — там, де ринок забере ліквідність перед розворотом.
-            4. Врахуй RSI: якщо RSI > 70 — шукай точку входу в шорт від OB, якщо < 30 — лонг від FVG.
-            5. Поточна ціна має бути поруч! Не давай рівні, до яких ціна не дійде сьогодні.
-            
-            Структура (УКРАЇНСЬКОЮ):
-            📊 КОНТЕКСТ ТА ЕКОНОМІКА
-            🎯 ПОЛЮВАННЯ НА СТОПИ (Твої лімітки на зняття ліквідності)
-            🛡 УПРАВЛІННЯ РИЗИКОМ (SL та TP)
-            📈 RSI АНАЛІЗ (Чи перегрітий ринок?)
-            """
-            
-            response = model.generate_content(prompt)
-            
-            try:
-                bot.send_message(CHANNEL_ID, response.text, parse_mode="Markdown")
-            except:
-                bot.send_message(CHANNEL_ID, response.text)
+                # Короткий, але потужний промпт для кожної пари
+                prompt = f"""
+                Пара: {name}
+                Ціна зараз: {price:{fmt}}
+                RSI (15m): {rsi_val}
+                Час: {kyiv_time}
                 
-            kyiv_log = datetime.utcnow() + timedelta(hours=3)
-            print(f"✅ АНАЛІЗ ВІДПРАВЛЕНО: {kyiv_log.strftime('%H:%M')}")
+                Ти професійний трейдер Smart Money. Дай короткий аналіз (до 500 символів):
+                1. Полімаркет/Макро: як новини впливають на {name}?
+                2. Stop Hunt: Де стоять стопи натовпу (BSL/SSL)?
+                3. Лімітка: Точна точка входу, SL та TP.
+                4. Висновок: Купуємо винос чи чекаємо ретест?
+                
+                Пиши українською, лаконічно, з емодзі.
+                """
+                
+                response = model.generate_content(prompt)
+                
+                msg = f"💎 **{name}** | {kyiv_time}\n\n{response.text}"
+                
+                try:
+                    bot.send_message(CHANNEL_ID, msg, parse_mode="Markdown")
+                except:
+                    bot.send_message(CHANNEL_ID, msg)
+                
+                time.sleep(5) # Пауза між повідомленнями, щоб Telegram не забанив
             
+            print(f"✅ Всі пари оновлено о {kyiv_time}. Чекаємо годину.")
             time.sleep(3600)
             
         except Exception as e:
