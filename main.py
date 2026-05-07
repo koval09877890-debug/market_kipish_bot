@@ -5,40 +5,56 @@ import yfinance as yf
 import time
 from datetime import datetime
 
-# 🔑 Дані з Railway (залишаємо як було)
+# 🔑 Налаштування (Railway Variables)
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
+# Ініціалізація AI (Використовуємо Gemini 3 Flash)
 genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Розширений список символів (DXY обов'язково!)
+# Список активів (Біткоїн замінено на AUD/USD)
 SYMBOLS = {
-    "DX-Y.NYB": "US Dollar Index", 
-    "GC=F": "Gold", 
+    "DX-Y.NYB": "DXY (Індекс долара)", 
+    "GC=F": "Gold (Золото)", 
     "GBPUSD=X": "GBP/USD", 
-    "AUDUSD=X": "AUD/USD",
-    "EURUSD=X": "EUR/USD"
+    "EURUSD=X": "EUR/USD",
+    "AUDUSD=X": "AUD/USD (Озі)"
 }
 
 def get_market_info():
-    summary = f"⏰ ЧАС (Київ): {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-    summary += "📊 РИНКОВІ ДАНІ:\n"
+    summary = f"⏰ ЧАС: {datetime.now().strftime('%d.%m %H:%M')} (Kyiv)\n\n"
+    market_context = ""
+    
     for ticker, name in SYMBOLS.items():
         try:
-            t = yf.Ticker(ticker)
-            price = t.fast_info['last_price']
-            fmt = ".2f" if "Index" in name else ".4f"
-            summary += f"🔹 {name}: {price:{fmt}}\n"
-        except:
+            data = yf.Ticker(ticker)
+            # Беремо дані за останні 5 днів
+            hist = data.history(period="5d")
+            if hist.empty: continue
+            
+            current_price = hist['Close'].iloc[-1]
+            prev_close = hist['Close'].iloc[-2]
+            high_day = hist['High'].iloc[-1]
+            low_day = hist['Low'].iloc[-1]
+            change = ((current_price - prev_close) / prev_close) * 100
+            
+            fmt = ".2f" if any(x in name for x in ["Index", "Gold"]) else ".4f"
+            
+            summary += f"🔹 **{name}**: `{current_price:{fmt}}` ({change:+.2f}%)\n"
+            market_context += (f"{name}: Зараз {current_price:{fmt}}, "
+                              f"Денний High: {high_day:{fmt}}, Low: {low_day:{fmt}}. ")
+        except Exception as e:
+            print(f"Помилка даних для {ticker}: {e}")
             continue
-    return summary
+            
+    return summary, market_context
 
 def run_kipish():
-    print("🚀 Паравоз виїхав з лімітками!")
+    print("🚀 Робот на Gemini 3 Flash (Forex + AUD/USD) запущений...")
     while True:
         try:
             if not CHANNEL_ID:
@@ -46,34 +62,38 @@ def run_kipish():
                 time.sleep(60)
                 continue
                 
-            market_data = get_market_info()
+            stats_text, ai_context = get_market_info()
             
-            # ОНОВЛЕНИЙ ПРОМПТ З ЛІМІТКАМИ
+            # Промпт для коротких дистанцій (Intraday)
             prompt = f"""
-            Ти професійний Smart Money трейдер. Твій стиль — пошук ліквідності (BSL/SSL) та робота від OB (Order Block).
+            Ти — Senior Smart Money Трейдер (ICT стиль). 
+            Твоя мета: дати сигнал для входу всередині дня, який ціна реально може зачепити найближчим часом.
             
-            Дані: 
-            {market_data}
+            Дані ринку: 
+            {ai_context}
             
             Твоє завдання:
-            1. Проаналізуй DXY (силу долара).
-            2. Для золота та валютних пар визнач ймовірні Зони інтересу (POI).
-            3. Напиши конкретні рівні для лімітних ордерів (Buy Limit / Sell Limit) та цілі (TP).
-            4. Врахуй макроекономіку та Polymarket (ставки, інфляція).
+            1. Аналіз сили DXY.
+            2. Визнач Зони інтересу (POI) ТІЛЬКИ поблизу поточної ціни (не давай входи за 500 пунктів).
+            3. Знайди найближчий Order Block або FVG на молодшому таймфреймі.
+            4. Формат відповіді:
+               - Актив
+               - Напрямок (Bullish/Bearish)
+               - Точка входу (Лімітка)
+               - Take Profit (найближча ліквідність)
             
-            Напиши аналіз українською мовою з емодзі. Структура:
-            📊 Контекст ринку
-            🎯 Лімітки (точки входу)
-            🚀 Цілі (ліквідність)
+            Пиши коротко, професійним сленгом, українською мовою. 
+            В кінці: "Не фінансова порада".
             """
             
             response = model.generate_content(prompt)
+            full_message = f"{stats_text}\n📊 **АНАЛІЗ ТА ЛІМІТКИ (GEMINI 3)**\n\n{response.text}"
             
-            bot.send_message(CHANNEL_ID, response.text)
-            print(f"✅ СИГНАЛ ВІДПРАВЛЕНО: {datetime.now().strftime('%H:%M')}")
+            bot.send_message(CHANNEL_ID, full_message, parse_mode="Markdown")
+            print(f"✅ Сигнал відправлено о {datetime.now().strftime('%H:%M')}")
             
-            # Чекаємо 1 годину (3600 сек)
-            time.sleep(3600)
+            # Пауза 2 години
+            time.sleep(7200)
             
         except Exception as e:
             print(f"❌ Помилка: {e}")
