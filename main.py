@@ -16,7 +16,7 @@ model = genai.GenerativeModel('gemini-3-flash-preview')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Список активів (Біткоїн замінено на AUD/USD)
+# Список активів
 SYMBOLS = {
     "DX-Y.NYB": "DXY (Індекс долара)", 
     "GC=F": "Gold (Золото)", 
@@ -32,7 +32,6 @@ def get_market_info():
     for ticker, name in SYMBOLS.items():
         try:
             data = yf.Ticker(ticker)
-            # Беремо дані за останні 5 днів
             hist = data.history(period="5d")
             if hist.empty: continue
             
@@ -54,7 +53,7 @@ def get_market_info():
     return summary, market_context
 
 def run_kipish():
-    print("🚀 Робот на Gemini 3 Flash (Forex + AUD/USD) запущений...")
+    print("🚀 Робот на Gemini 3 (Forex + AUD/USD) у роботі...")
     while True:
         try:
             if not CHANNEL_ID:
@@ -64,35 +63,33 @@ def run_kipish():
                 
             stats_text, ai_context = get_market_info()
             
-            # Промпт для коротких дистанцій (Intraday)
+            # ОНОВЛЕНО: Тепер Gemini аналізує КОЖЕН актив окремо
             prompt = f"""
             Ти — Senior Smart Money Трейдер (ICT стиль). 
-            Твоя мета: дати сигнал для входу всередині дня, який ціна реально може зачепити найближчим часом.
+            Твоє завдання: провести аналіз для КОЖНОГО активу зі списку окремо.
             
             Дані ринку: 
             {ai_context}
             
-            Твоє завдання:
-            1. Аналіз сили DXY.
-            2. Визнач Зони інтересу (POI) ТІЛЬКИ поблизу поточної ціни (не давай входи за 500 пунктів).
-            3. Знайди найближчий Order Block або FVG на молодшому таймфреймі.
-            4. Формат відповіді:
-               - Актив
-               - Напрямок (Bullish/Bearish)
-               - Точка входу (Лімітка)
-               - Take Profit (найближча ліквідність)
+            ПЛАН РОБОТИ:
+            1. Проаналізуй силу DXY та його вплив на інші пари.
+            2. Для КОЖНОГО активу (Gold, GBP/USD, EUR/USD, AUD/USD) визнач:
+               - Bias (Напрямок: Bullish/Bearish).
+               - POI (Точка входу): шукай найближчі зони (OB, FVG) на M15/H1. Вхід має бути реальним (15-40 пунктів від ціни).
+               - Take Profit (найближчий рівень ліквідності).
             
-            Пиши коротко, професійним сленгом, українською мовою. 
-            В кінці: "Не фінансова порада".
+            Якщо по якомусь активу немає чіткого сигналу — пиши "Поза ринком / Очікування".
+            Пиши коротко, професійною мовою ICT, українською, з емодзі.
+            В кінці додай: "Не фінансова порада".
             """
             
             response = model.generate_content(prompt)
             full_message = f"{stats_text}\n📊 **АНАЛІЗ ТА ЛІМІТКИ (GEMINI 3)**\n\n{response.text}"
             
             bot.send_message(CHANNEL_ID, full_message, parse_mode="Markdown")
-            print(f"✅ Сигнал відправлено о {datetime.now().strftime('%H:%M')}")
+            print(f"✅ Сигнали по всіх парах відправлено: {datetime.now().strftime('%H:%M')}")
             
-            # Пауза 2 години
+            # Пауза 2 години для уникнення лімітів API
             time.sleep(7200)
             
         except Exception as e:
