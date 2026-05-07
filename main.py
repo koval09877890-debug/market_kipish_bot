@@ -10,12 +10,13 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
-# Повертаємо ініціалізацію, яка працювала
+# Ініціалізація AI (Використовуємо Gemini 3 Flash)
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-3-flash-preview') # Залишаємо Gemini 3
+model = genai.GenerativeModel('gemini-3-flash-preview')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# Список активів (Біткоїн замінено на AUD/USD)
 SYMBOLS = {
     "DX-Y.NYB": "DXY (Індекс долара)", 
     "GC=F": "Gold (Золото)", 
@@ -27,57 +28,75 @@ SYMBOLS = {
 def get_market_info():
     summary = f"⏰ ЧАС: {datetime.now().strftime('%d.%m %H:%M')} (Kyiv)\n\n"
     market_context = ""
+    
     for ticker, name in SYMBOLS.items():
         try:
             data = yf.Ticker(ticker)
+            # Беремо дані за останні 5 днів
             hist = data.history(period="5d")
             if hist.empty: continue
-            curr = hist['Close'].iloc[-1]
-            high = hist['High'].iloc[-1]
-            low = hist['Low'].iloc[-1]
-            # Форматування для стабільності
+            
+            current_price = hist['Close'].iloc[-1]
+            prev_close = hist['Close'].iloc[-2]
+            high_day = hist['High'].iloc[-1]
+            low_day = hist['Low'].iloc[-1]
+            change = ((current_price - prev_close) / prev_close) * 100
+            
             fmt = ".2f" if any(x in name for x in ["Index", "Gold"]) else ".4f"
-            summary += f"🔹 **{name}**: `{curr:{fmt}}`\n"
-            market_context += f"{name}: Зараз {curr:{fmt}}, High: {high:{fmt}}, Low: {low:{fmt}}. "
+            
+            summary += f"🔹 **{name}**: `{current_price:{fmt}}` ({change:+.2f}%)\n"
+            market_context += (f"{name}: Зараз {current_price:{fmt}}, "
+                              f"Денний High: {high_day:{fmt}}, Low: {low_day:{fmt}}. ")
         except Exception as e:
-            print(f"Помилка даних {ticker}: {e}")
+            print(f"Помилка даних для {ticker}: {e}")
+            continue
+            
     return summary, market_context
 
 def run_kipish():
-    # Текст запуску, як на твоєму скріні
-    print("🚀 Робот на Gemini 3 (Forex + AUD/USD) у роботі...") 
+    print("🚀 Робот на Gemini 3 Flash (Forex + AUD/USD) запущений...")
     while True:
         try:
+            if not CHANNEL_ID:
+                print("❌ CHANNEL_ID не знайдено!")
+                time.sleep(60)
+                continue
+                
             stats_text, ai_context = get_market_info()
             
+            # Промпт для коротких дистанцій (Intraday)
             prompt = f"""
-            Ти — Senior Smart Money Трейдер. Проаналізуй КОЖЕН актив окремо:
+            Ти — Senior Smart Money Трейдер (ICT стиль). 
+            Твоя мета: дати сигнал для входу всередині дня, який ціна реально може зачепити найближчим часом.
+            
+            Дані ринку: 
             {ai_context}
             
-            Для КОЖНОГО (Gold, GBP/USD, EUR/USD, AUD/USD) дай:
-            - Напрямок (Bias)
-            - POI (Зона входу ближче до поточної ціни)
-            - Take Profit
+            Твоє завдання:
+            1. Аналіз сили DXY.
+            2. Визнач Зони інтересу (POI) ТІЛЬКИ поблизу поточної ціни (не давай входи за 500 пунктів).
+            3. Знайди найближчий Order Block або FVG на молодшому таймфреймі.
+            4. Формат відповіді:
+               - Актив
+               - Напрямок (Bullish/Bearish)
+               - Точка входу (Лімітка)
+               - Take Profit (найближча ліквідність)
             
-            Важливо: НЕ використовуй нижні підкреслення '_' у тексті, тільки зірочки '**' для жирного тексту.
-            Відповідай українською, професійно.
+            Пиши коротко, професійним сленгом, українською мовою. 
+            В кінці: "Не фінансова порада".
             """
             
             response = model.generate_content(prompt)
-            # Додаємо префікс аналізу
             full_message = f"{stats_text}\n📊 **АНАЛІЗ ТА ЛІМІТКИ (GEMINI 3)**\n\n{response.text}"
             
-            # Використовуємо Markdown (без V2), щоб уникнути помилок парсингу
             bot.send_message(CHANNEL_ID, full_message, parse_mode="Markdown")
             print(f"✅ Сигнал відправлено о {datetime.now().strftime('%H:%M')}")
             
-            time.sleep(7200) # Пауза 2 години
+            # Пауза 2 години
+            time.sleep(7200)
             
         except Exception as e:
             print(f"❌ Помилка: {e}")
-            # Якщо це помилка парсингу, пробуємо відправити без розмітки
-            if "can't parse entities" in str(e).lower():
-                bot.send_message(CHANNEL_ID, full_message)
             time.sleep(300)
 
 if __name__ == "__main__":
