@@ -1,6 +1,6 @@
 import telebot
 import os
-from genai import Client # Новий спосіб імпорту
+import google.generativeai as genai
 import yfinance as yf
 import time
 from datetime import datetime
@@ -10,9 +10,9 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
-# Ініціалізація нового клієнта Google AI
-client = Client(api_key=GEMINI_KEY)
-MODEL_ID = "gemini-3-flash-preview" # Твоя модель з вибору
+# Повертаємо ініціалізацію, яка працювала
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-3-flash-preview') # Залишаємо Gemini 3
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -35,14 +35,17 @@ def get_market_info():
             curr = hist['Close'].iloc[-1]
             high = hist['High'].iloc[-1]
             low = hist['Low'].iloc[-1]
-            summary += f"🔹 **{name}**: `{curr:.4f}`\n"
-            market_context += f"{name}: Зараз {curr:.4f}, High: {high:.4f}, Low: {low:.4f}. "
+            # Форматування для стабільності
+            fmt = ".2f" if any(x in name for x in ["Index", "Gold"]) else ".4f"
+            summary += f"🔹 **{name}**: `{curr:{fmt}}`\n"
+            market_context += f"{name}: Зараз {curr:{fmt}}, High: {high:{fmt}}, Low: {low:{fmt}}. "
         except Exception as e:
             print(f"Помилка даних {ticker}: {e}")
     return summary, market_context
 
 def run_kipish():
-    print(f"🚀 Робот на НОВОМУ SDK (Gemini 3 Flash) запущений...")
+    # Текст запуску, як на твоєму скріні
+    print("🚀 Робот на Gemini 3 (Forex + AUD/USD) у роботі...") 
     while True:
         try:
             stats_text, ai_context = get_market_info()
@@ -51,26 +54,30 @@ def run_kipish():
             Ти — Senior Smart Money Трейдер. Проаналізуй КОЖЕН актив окремо:
             {ai_context}
             
-            Для кожного (Gold, GBP/USD, EUR/USD, AUD/USD) дай:
+            Для КОЖНОГО (Gold, GBP/USD, EUR/USD, AUD/USD) дай:
             - Напрямок (Bias)
-            - Точку входу (найближча зона OB/FVG на M15)
+            - POI (Зона входу ближче до поточної ціни)
             - Take Profit
-            Пиши коротко, професійно, українською.
+            
+            Важливо: НЕ використовуй нижні підкреслення '_' у тексті, тільки зірочки '**' для жирного тексту.
+            Відповідай українською, професійно.
             """
             
-            # Новий спосіб виклику генерації
-            response = client.models.generate_content(
-                model=MODEL_ID,
-                contents=prompt
-            )
+            response = model.generate_content(prompt)
+            # Додаємо префікс аналізу
+            full_message = f"{stats_text}\n📊 **АНАЛІЗ ТА ЛІМІТКИ (GEMINI 3)**\n\n{response.text}"
             
-            full_message = f"{stats_text}\n📊 **АНАЛІЗ (НОВИЙ SDK)**\n\n{response.text}"
+            # Використовуємо Markdown (без V2), щоб уникнути помилок парсингу
             bot.send_message(CHANNEL_ID, full_message, parse_mode="Markdown")
+            print(f"✅ Сигнал відправлено о {datetime.now().strftime('%H:%M')}")
             
             time.sleep(7200) # Пауза 2 години
             
         except Exception as e:
             print(f"❌ Помилка: {e}")
+            # Якщо це помилка парсингу, пробуємо відправити без розмітки
+            if "can't parse entities" in str(e).lower():
+                bot.send_message(CHANNEL_ID, full_message)
             time.sleep(300)
 
 if __name__ == "__main__":
