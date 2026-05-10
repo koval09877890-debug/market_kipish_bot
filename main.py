@@ -3,20 +3,20 @@ import os
 import google.generativeai as genai
 import yfinance as yf
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 🔑 Налаштування (Railway Variables)
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 GEMINI_KEY = os.environ.get('GEMINI_KEY')
 CHANNEL_ID = os.environ.get('CHANNEL_ID')
 
-# Ініціалізація AI (Використовуємо Gemini 3 Flash)
+# Ініціалізація AI
 genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Список активів (Біткоїн замінено на AUD/USD)
+# Список активів
 SYMBOLS = {
     "DX-Y.NYB": "DXY (Індекс долара)", 
     "GC=F": "Gold (Золото)", 
@@ -26,7 +26,9 @@ SYMBOLS = {
 }
 
 def get_market_info():
-    summary = f"⏰ ЧАС: {datetime.now().strftime('%d.%m %H:%M')} (Kyiv)\n\n"
+    # Розрахунок Київського часу (UTC+3)
+    kyiv_time = datetime.utcnow() + timedelta(hours=3)
+    summary = f"⏰ ЧАС: {kyiv_time.strftime('%d.%m %H:%M')} (Kyiv)\n\n"
     market_context = ""
     
     for ticker, name in SYMBOLS.items():
@@ -54,7 +56,7 @@ def get_market_info():
     return summary, market_context
 
 def run_kipish():
-    print("🚀 Робот на Gemini 3 Flash (Forex + AUD/USD) запущений...")
+    print("🚀 Робот на Gemini 3 Flash (Forex) запущений...")
     while True:
         try:
             if not CHANNEL_ID:
@@ -64,7 +66,7 @@ def run_kipish():
                 
             stats_text, ai_context = get_market_info()
             
-            # Промпт для коротких дистанцій (Intraday)
+            # Жорсткіший промпт для аналізу ВСІХ пар
             prompt = f"""
             Ти — Senior Smart Money Трейдер (ICT стиль). 
             Твоя мета: дати сигнал для входу всередині дня, який ціна реально може зачепити найближчим часом.
@@ -73,27 +75,30 @@ def run_kipish():
             {ai_context}
             
             Твоє завдання:
-            1. Аналіз сили DXY.
-            2. Визнач Зони інтересу (POI) ТІЛЬКИ поблизу поточної ціни (не давай входи за 500 пунктів).
-            3. Знайди найближчий Order Block або FVG на молодшому таймфреймі.
-            4. Формат відповіді:
-               - Актив
-               - Напрямок (Bullish/Bearish)
-               - Точка входу (Лімітка)
-               - Take Profit (найближча ліквідність)
+            1. Зроби загальний короткий висновок по DXY.
+            2. ОБОВ'ЯЗКОВО дай окремий сетап для КОЖНОЇ з трьох валютних пар: EUR/USD, GBP/USD та AUD/USD.
+            3. Визнач Зони інтересу (POI) ТІЛЬКИ поблизу поточної ціни (не давай входи за 500 пунктів).
             
-            Пиши коротко, професійним сленгом, українською мовою. 
-            В кінці: "Не фінансова порада".
+            Формат відповіді ДЛЯ КОЖНОЇ ПАРИ:
+            📌 Актив: [Назва]
+            Напрямок: [Bullish/Bearish]
+            Точка входу: [Лімітка від FVG або OB]
+            Take Profit: [найближча ліквідність]
+            
+            Пиши коротко, без зайвої води, професійним сленгом, українською мовою. 
+            В кінці додай: "Не фінансова порада".
             """
             
             response = model.generate_content(prompt)
-            full_message = f"{stats_text}\n📊 **АНАЛІЗ ТА ЛІМІТКИ (GEMINI 3)**\n\n{response.text}"
+            full_message = f"{stats_text}\n📊 **АНАЛІЗ ТА ЛІМІТКИ (GEMINI)**\n\n{response.text}"
             
             bot.send_message(CHANNEL_ID, full_message, parse_mode="Markdown")
-            print(f"✅ Сигнал відправлено о {datetime.now().strftime('%H:%M')}")
             
-            # Пауза 2 години
-            time.sleep(7200)
+            kyiv_time = datetime.utcnow() + timedelta(hours=3)
+            print(f"✅ Сигнал відправлено о {kyiv_time.strftime('%H:%M')}")
+            
+            # Пауза 1 година (3600 секунд)
+            time.sleep(3600)
             
         except Exception as e:
             print(f"❌ Помилка: {e}")
